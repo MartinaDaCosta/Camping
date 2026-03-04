@@ -1,172 +1,585 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.lab
 
-import android.content.Context
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.res.Resources
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.lab.ui.theme.LABTheme
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import org.json.JSONObject
+import java.io.InputStream
 
+/* =========================
+   🧭 ROUTES
+   ========================= */
+object Routes {
+    const val LIST = "camping_list"
+    const val DETAIL = "camping_detail"
+    const val ARG_ID = "campingId"
+    const val DETAIL_ROUTE = "$DETAIL/{$ARG_ID}"
+    fun detailRoute(id: String) = "$DETAIL/$id"
+}
+
+/* =========================
+   🔃 SORT
+   ========================= */
+enum class SortOption {
+    NAME_ASC, NAME_DESC,
+    PLACES_ASC, PLACES_DESC,
+    CATEGORY_ASC, CATEGORY_DESC
+}
+
+private fun sortOptionLabel(option: SortOption): String {
+    return when (option) {
+        SortOption.NAME_ASC -> "Nombre (A→Z)"
+        SortOption.NAME_DESC -> "Nombre (Z→A)"
+        SortOption.PLACES_ASC -> "Plazas (↑)"
+        SortOption.PLACES_DESC -> "Plazas (↓)"
+        SortOption.CATEGORY_ASC -> "Categoría (A→Z)"
+        SortOption.CATEGORY_DESC -> "Categoría (Z→A)"
+    }
+}
+
+/* =========================
+   🏕️ MODEL
+   ========================= */
+data class Camping(
+    val signatura: String,
+    val nombre: String,
+    val categoria: String,
+    val provincia: String,
+    val municipio: String,
+    val direccion: String,
+    val cp: Int,
+    val plazas: Int,
+    val numParcelas: Int,
+    val web: String,
+    val email: String,
+    val periodo: String
+)
+
+/* =========================
+   🎨 THEME (AQUA)
+   ========================= */
+private val AquaGreen = Color(0xFF4DB6AC)
+private val AquaGreenDark = Color(0xFF00897B)
+private val AquaGreenLight = Color(0xFFB2DFDB)
+private val AquaSurface = Color(0xFFEAF7F6) // fondo suave
+private val White = Color(0xFFFFFFFF)
+
+private val AquaColorScheme = lightColorScheme(
+    primary = AquaGreen,
+    onPrimary = White,
+    secondary = AquaGreenDark,
+    onSecondary = White,
+    background = AquaSurface,
+    onBackground = Color(0xFF0F1F1E),
+    surface = AquaSurface,
+    onSurface = Color(0xFF0F1F1E),
+    primaryContainer = AquaGreenLight,
+    onPrimaryContainer = Color(0xFF0B2B28),
+    secondaryContainer = Color(0xFFCDEBE8),
+    onSecondaryContainer = Color(0xFF0B2B28)
+)
+
+@Composable
+private fun AppTopBarColors() = TopAppBarDefaults.topAppBarColors(
+    containerColor = MaterialTheme.colorScheme.primary,
+    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+)
+
+/* =========================
+   📱 MAIN ACTIVITY
+   ========================= */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
+        val campings = getData(resources)
+
         setContent {
-            LABTheme {
-                CampingsScreen()
+            MaterialTheme(colorScheme = AquaColorScheme) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppNavGraph(campings)
                 }
             }
         }
     }
-
-
-// CLASE
-data class Camping(
-    val id: String,
-    val nombre: String,
-    val municipio: String,
-    val categoria: String,
-    val plazas: Int
-)
-
-
-// READ JSON
-
-fun readJsonFromRaw(context: Context, resourceId: Int): String {
-    val inputStream = context.resources.openRawResource(resourceId)
-    return inputStream.bufferedReader().use { it.readText() }
 }
 
+/* =========================
+   📂 JSON
+   ========================= */
+fun readJsonFromRaw(resources: Resources, rawResourceId: Int): String {
+    val inputStream: InputStream = resources.openRawResource(rawResourceId)
+    val buffer = ByteArray(inputStream.available())
+    inputStream.read(buffer)
+    inputStream.close()
+    return String(buffer, Charsets.UTF_8)
+}
 
-fun getCampingList(context: Context): List<Camping> {
+private fun getData(resources: Resources): ArrayList<Camping> {
+    val lista = ArrayList<Camping>()
+    val jsonFileContent = readJsonFromRaw(resources, R.raw.camping)
 
-    val campingsList = mutableListOf<Camping>()
-    val jsonString = readJsonFromRaw(context, R.raw.camping)
+    val root = JSONObject(jsonFileContent)
+    val result = root.getJSONObject("result")
+    val records = result.getJSONArray("records")
 
-    try {
-        val rootObject = JSONObject(jsonString)
-        val resultObject = rootObject.getJSONObject("result")
-        val recordsArray = resultObject.getJSONArray("records")
+    for (i in 0 until records.length()) {
+        val item = records.getJSONObject(i)
 
-        for (i in 0 until recordsArray.length()) {
+        val cp = item.optString("CP", "0").toIntOrNull() ?: 0
+        val plazas = item.optString("Plazas", "0").toIntOrNull() ?: 0
+        val numParcelas = item.optString("Núm. Parcelas", "0").toIntOrNull() ?: 0
 
-            val jsonObject = recordsArray.getJSONObject(i)
+        lista.add(
+            Camping(
+                signatura = item.optString("Signatura", ""),
+                nombre = item.optString("Nombre", "Sin nombre"),
+                categoria = item.optString("Categoria", ""),
+                provincia = item.optString("Provincia", ""),
+                municipio = item.optString("Municipio", ""),
+                direccion = item.optString("Direccion", ""),
+                cp = cp,
+                plazas = plazas,
+                numParcelas = numParcelas,
+                web = item.optString("Web", ""),
+                email = item.optString("Email", ""),
+                periodo = item.optString("Periodo", "")
+            )
+        )
+    }
+    return lista
+}
 
-            val id = jsonObject.getInt("_id").toString()
-            val nombre = jsonObject.getString("Nombre")
-            val municipio = jsonObject.getString("Municipio")
-            val categoria = jsonObject.getString("Categoria")
-            val plazas = jsonObject.getInt("Plazas")
+/* =========================
+   🧭 NAV GRAPH
+   ========================= */
+@Composable
+fun AppNavGraph(campings: List<Camping>) {
+    val navController = rememberNavController()
 
-            campingsList.add(
-                Camping(id, nombre, municipio, categoria, plazas)
+    NavHost(
+        navController = navController,
+        startDestination = Routes.LIST
+    ) {
+        composable(Routes.LIST) {
+            CampingsListScreen(
+                campings = campings,
+                onCampingClick = { id -> navController.navigate(Routes.detailRoute(id)) }
             )
         }
 
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
+        composable(
+            route = Routes.DETAIL_ROUTE,
+            arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType })
+        ) { backStackEntry ->
+            val campingId = backStackEntry.arguments?.getString(Routes.ARG_ID)
+            val selected = campings.firstOrNull { it.signatura == campingId }
 
-    return campingsList
+            CampingDetailScreen(
+                camping = selected,
+                onBack = { navController.popBackStack() }
+            )
+        }
+    }
 }
 
-
-// UI
-
+/* =========================
+   🖥️ SCREEN 1: LIST
+   ========================= */
 @Composable
-fun CampingsScreen() {
+fun CampingsListScreen(
+    campings: List<Camping>,
+    onCampingClick: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var sortOption by remember { mutableStateOf(SortOption.NAME_ASC) }
 
-    val context = LocalContext.current
-    val campings = getCampingList(context)
+    val sortedCampings = remember(campings, sortOption) {
+        when (sortOption) {
+            SortOption.NAME_ASC -> campings.sortedBy { it.nombre.lowercase() }
+            SortOption.NAME_DESC -> campings.sortedByDescending { it.nombre.lowercase() }
+            SortOption.PLACES_ASC -> campings.sortedBy { it.plazas }
+            SortOption.PLACES_DESC -> campings.sortedByDescending { it.plazas }
+            SortOption.CATEGORY_ASC -> campings.sortedBy { it.categoria.lowercase() }
+            SortOption.CATEGORY_DESC -> campings.sortedByDescending { it.categoria.lowercase() }
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFEDEDED))
-            .padding(16.dp)
-    ) {
-
-        Text(
-            text = "Campings",
-            fontSize = 22.sp,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        LazyColumn {
-            items(campings) { camping ->
-                CampingItem(camping)
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                colors = AppTopBarColors(),
+                title = {
+                    Column {
+                        Text("CAMPINGS GVA", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Orden: ${sortOptionLabel(sortOption)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(onClick = { expanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Sort menu")
+                        }
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Nombre (A→Z)") },
+                                onClick = { sortOption = SortOption.NAME_ASC; expanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Nombre (Z→A)") },
+                                onClick = { sortOption = SortOption.NAME_DESC; expanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Plazas (menor→mayor)") },
+                                onClick = { sortOption = SortOption.PLACES_ASC; expanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Plazas (mayor→menor)") },
+                                onClick = { sortOption = SortOption.PLACES_DESC; expanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Categoría (A→Z)") },
+                                onClick = { sortOption = SortOption.CATEGORY_ASC; expanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Categoría (Z→A)") },
+                                onClick = { sortOption = SortOption.CATEGORY_DESC; expanded = false }
+                            )
+                        }
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            items(sortedCampings, key = { it.signatura }) { camping ->
+                CampingItem(
+                    c = camping,
+                    onClick = { onCampingClick(camping.signatura) }
+                )
             }
         }
-
     }
 }
 
+/* =========================
+   🏕️ ITEM
+   ========================= */
 @Composable
-fun CampingItem(camping: Camping) {
-
+fun CampingItem(c: Camping, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        shape = MaterialTheme.shapes.medium,
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFDADADA)
-        )
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
-
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "ID: ${camping.id}"
-            )
+        Column(modifier = Modifier.padding(16.dp)) {
 
             Text(
-                text = "Nombre: ${camping.nombre}",
-                fontSize = 16.sp
+                text = c.nombre,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            Text(
-                text = "Municipio: ${camping.municipio}"
-            )
+            if (c.municipio.isNotBlank() || c.provincia.isNotBlank()) {
+                Text(
+                    text = "📍 ${c.municipio} (${c.provincia})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            if (c.direccion.isNotBlank()) {
+                val addr = if (c.cp != 0) "${c.direccion} (${c.cp})" else c.direccion
+                Text(
+                    text = addr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
 
-            Text(
-                text = "Categoría: ${camping.categoria}"
-            )
+            Spacer(modifier = Modifier.height(12.dp))
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                SmallMetric(label = "Plazas", value = c.plazas.toString())
+                SmallMetric(label = "Parcelas", value = c.numParcelas.toString())
+                if (c.categoria.isNotBlank()) {
+                    Column {
+                        Text(
+                            text = "Categoría",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
 
-            Text(
-                text = "Plazas: ${camping.plazas}"
-            )
+                        val mapEstrellas = mapOf(
+                            "UNA ESTRELLA" to 1,
+                            "DOS ESTRELLAS" to 2,
+                            "TRES ESTRELLAS" to 3,
+                            "CUATRO ESTRELLAS" to 4,
+                            "CINCO ESTRELLAS" to 5
+                        )
+                        val estrellasNum = mapEstrellas[c.categoria.uppercase()] ?: 0
+                        Text(
+                            text = "⭐".repeat(estrellasNum),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-
+            if (c.periodo.isNotBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "🗓️ ${c.periodo}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun SmallMetric(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    }
+}
+
+/* =========================
+   🖥️ SCREEN 2: DETAIL
+   ========================= */
+@Composable
+fun CampingDetailScreen(
+    camping: Camping?,
+    onBack: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                colors = AppTopBarColors(),
+                title = { Text(camping?.nombre ?: "Detalle") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Abrir en Maps") },
+                            onClick = {
+                                camping?.let { openInMaps(context, it) }
+                                menuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Abrir web") },
+                            onClick = {
+                                camping?.let { openWebsite(context, it.web) }
+                                menuExpanded = false
+                            }
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (camping == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Camping no encontrado", color = MaterialTheme.colorScheme.onBackground)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(
+                                camping.nombre,
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(Modifier.height(6.dp))
+
+                            if (camping.municipio.isNotBlank() || camping.provincia.isNotBlank()) {
+                                Text(
+                                    "📍 ${camping.municipio} (${camping.provincia})",
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+
+                            if (camping.direccion.isNotBlank()) {
+                                val addr =
+                                    if (camping.cp != 0) "${camping.direccion} (${camping.cp})"
+                                    else camping.direccion
+                                Text(addr, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(
+                            Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            DetailRow("Signatura", camping.signatura)
+                            DetailRow("Categoría", camping.categoria)
+                            DetailRow("Plazas", camping.plazas.toString())
+                            DetailRow("Parcelas", camping.numParcelas.toString())
+                            DetailRow("Periodo", camping.periodo)
+                            DetailRow("Web", camping.web)
+                            DetailRow("Email", camping.email)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Text(
+            if (value.isBlank()) "-" else value,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+        Divider(
+            modifier = Modifier.padding(top = 8.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
+        )
+    }
+}
+
+/* =========================
+   🌍 INTENTS: MAPS + WEB
+   ========================= */
+fun openInMaps(context: android.content.Context, c: Camping) {
+    val query = listOf(c.direccion, c.municipio, c.provincia)
+        .filter { it.isNotBlank() }
+        .joinToString(", ")
+        .ifBlank { c.nombre }
+
+    val uri = Uri.parse("geo:0,0?q=${Uri.encode(query)}")
+    val intent = Intent(Intent.ACTION_VIEW, uri)
+
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No hay app de mapas instalada", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun openWebsite(context: android.content.Context, web: String) {
+    val url = web.trim()
+    if (url.isBlank()) {
+        Toast.makeText(context, "Este camping no tiene web", Toast.LENGTH_SHORT).show()
+        return
+    }
+
+    val normalized =
+        if (url.startsWith("http://") || url.startsWith("https://")) url else "https://$url"
+
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(normalized))
+
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No hay navegador disponible", Toast.LENGTH_SHORT).show()
     }
 }
