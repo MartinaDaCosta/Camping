@@ -1,7 +1,11 @@
-package com.example.lab
+package com.example.lab.data
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 
-data class Campings(
+@Entity(tableName = "favorites")
+data class CampingFavorite(
+    @PrimaryKey
     val signatura: String,
     val nombre: String,
     val categoria: String,
@@ -15,4 +19,3 @@ data class Campings(
     val email: String,
     val periodo: String
 )
-
