@@ -3,7 +3,7 @@ package com.example.lab.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.lab.Camping
+import com.example.lab.Campings
 import com.example.lab.data.AppDatabase
 import com.example.lab.data.CampingFavorite
 import kotlinx.coroutines.flow.Flow
@@ -18,7 +18,7 @@ class FavoritesViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun isFavorite(signatura: String): Flow<Boolean> = dao.isFavorite(signatura)
 
-    fun toggleFavorite(camping: Camping, isFav: Boolean) {
+    fun toggleFavorite(camping: Campings, isFav: Boolean) {
         viewModelScope.launch {
             if (isFav) {
                 dao.removeFavorite(camping.toFavorite())
@@ -30,7 +30,7 @@ class FavoritesViewModel(application: Application) : AndroidViewModel(applicatio
 }
 
 // Extension function para convertir Camping → CampingFavorite
-fun Camping.toFavorite() = CampingFavorite(
+fun Campings.toFavorite() = CampingFavorite(
     signatura = signatura,
     nombre = nombre,
     categoria = categoria,
@@ -46,7 +46,7 @@ fun Camping.toFavorite() = CampingFavorite(
 )
 
 // Extension function para convertir CampingFavorite → Camping
-fun CampingFavorite.toCamping() = Camping(
+fun CampingFavorite.toCamping() = Campings(
     signatura = signatura,
     nombre = nombre,
     categoria = categoria,

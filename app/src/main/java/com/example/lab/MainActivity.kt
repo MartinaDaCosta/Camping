@@ -36,9 +36,23 @@ import com.example.lab.viewmodel.FavoritesViewModel
 import com.example.lab.viewmodel.toCamping
 import org.json.JSONObject
 import java.io.InputStream
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import java.util.Locale
+import com.example.lab.Campings
 
 /* =========================
-   🧭 ROUTES
+   ROUTES
    ========================= */
 object Routes {
     const val LIST = "camping_list"
@@ -50,12 +64,13 @@ object Routes {
 }
 
 /* =========================
-   🔃 SORT
+   SORT
    ========================= */
 enum class SortOption {
     NAME_ASC, NAME_DESC,
     PLACES_ASC, PLACES_DESC,
-    CATEGORY_ASC, CATEGORY_DESC
+    CATEGORY_ASC, CATEGORY_DESC,
+    DISTANCE_ASC, DISTANCE_DESC
 }
 
 private fun sortOptionLabel(option: SortOption): String = when (option) {
@@ -65,28 +80,12 @@ private fun sortOptionLabel(option: SortOption): String = when (option) {
     SortOption.PLACES_DESC -> "Plazas (↓)"
     SortOption.CATEGORY_ASC -> "Categoría (A→Z)"
     SortOption.CATEGORY_DESC -> "Categoría (Z→A)"
+    SortOption.DISTANCE_ASC -> "Distancia (cerca→lejos)"
+    SortOption.DISTANCE_DESC -> "Distancia (lejos→cerca)"
 }
 
 /* =========================
-   🏕️ MODEL
-   ========================= */
-data class Camping(
-    val signatura: String,
-    val nombre: String,
-    val categoria: String,
-    val provincia: String,
-    val municipio: String,
-    val direccion: String,
-    val cp: Int,
-    val plazas: Int,
-    val numParcelas: Int,
-    val web: String,
-    val email: String,
-    val periodo: String
-)
-
-/* =========================
-   🎨 THEME (AQUA)
+   THEME (AQUA)
    ========================= */
 private val AquaGreen = Color(0xFF4DB6AC)
 private val AquaGreenDark = Color(0xFF00897B)
@@ -118,7 +117,7 @@ private fun AppTopBarColors() = TopAppBarDefaults.topAppBarColors(
 )
 
 /* =========================
-   📱 MAIN ACTIVITY
+   MAIN ACTIVITY
    ========================= */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,7 +137,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /* =========================
-   📂 JSON
+   JSON
    ========================= */
 fun readJsonFromRaw(resources: Resources, rawResourceId: Int): String {
     val inputStream: InputStream = resources.openRawResource(rawResourceId)
@@ -148,8 +147,8 @@ fun readJsonFromRaw(resources: Resources, rawResourceId: Int): String {
     return String(buffer, Charsets.UTF_8)
 }
 
-private fun getData(resources: Resources): ArrayList<Camping> {
-    val lista = ArrayList<Camping>()
+private fun getData(resources: Resources): ArrayList<Campings> {
+    val lista = ArrayList<Campings>()
     val jsonFileContent = readJsonFromRaw(resources, R.raw.camping)
     val root = JSONObject(jsonFileContent)
     val result = root.getJSONObject("result")
@@ -158,7 +157,7 @@ private fun getData(resources: Resources): ArrayList<Camping> {
     for (i in 0 until records.length()) {
         val item = records.getJSONObject(i)
         lista.add(
-            Camping(
+            Campings(
                 signatura = item.optString("Signatura", ""),
                 nombre = item.optString("Nombre", "Sin nombre"),
                 categoria = item.optString("Categoria", ""),
@@ -178,18 +177,23 @@ private fun getData(resources: Resources): ArrayList<Camping> {
 }
 
 /* =========================
-   🧭 NAV GRAPH
+    NAV GRAPH
    ========================= */
 @Composable
-fun AppNavGraph(campings: List<Camping>) {
+fun AppNavGraph(campings: List<Campings>) {
     val navController = rememberNavController()
     val favViewModel: FavoritesViewModel = viewModel()
+
+    var campingsWithDistance by remember { mutableStateOf(campings) }
 
     NavHost(navController = navController, startDestination = Routes.LIST) {
 
         composable(Routes.LIST) {
             CampingsListScreen(
-                campings = campings,
+                campings = campingsWithDistance,
+                onCampingsUpdated = { updatedList ->
+                    campingsWithDistance = updatedList
+                },
                 favViewModel = favViewModel,
                 onCampingClick = { id -> navController.navigate(Routes.detailRoute(id)) },
                 onFavoritesClick = { navController.navigate(Routes.FAVORITES) }
@@ -201,7 +205,8 @@ fun AppNavGraph(campings: List<Camping>) {
             arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType })
         ) { backStackEntry ->
             val campingId = backStackEntry.arguments?.getString(Routes.ARG_ID)
-            val selected = campings.firstOrNull { it.signatura == campingId }
+            val selected = campingsWithDistance.firstOrNull { it.signatura == campingId }
+
             CampingDetailScreen(
                 camping = selected,
                 favViewModel = favViewModel,
@@ -221,11 +226,90 @@ fun AppNavGraph(campings: List<Camping>) {
 }
 
 /* =========================
-   🖥️ SCREEN 1: LIST
+    LOCATION HELPERS
+   ========================= */
+@SuppressLint("MissingPermission")
+fun getUserLocation(
+    context: android.content.Context,
+    onResult: (Location?) -> Unit
+) {
+    val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+
+    fusedLocationClient.getCurrentLocation(
+        Priority.PRIORITY_HIGH_ACCURACY,
+        null
+    ).addOnSuccessListener { location ->
+        onResult(location)
+    }.addOnFailureListener {
+        onResult(null)
+    }
+}
+
+fun geocodeCamping(
+    context: android.content.Context,
+    camping: Campings,
+    onResult: (Double?, Double?) -> Unit
+) {
+    if (!Geocoder.isPresent()) {
+        onResult(null, null)
+        return
+    }
+
+    val query = listOf(
+        camping.direccion,
+        camping.municipio,
+        camping.provincia,
+        "España"
+    ).filter { it.isNotBlank() }.joinToString(", ")
+
+    val geocoder = Geocoder(context, Locale.getDefault())
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        geocoder.getFromLocationName(query, 1, object : Geocoder.GeocodeListener {
+            override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                val address = addresses.firstOrNull()
+                onResult(address?.latitude, address?.longitude)
+            }
+
+            override fun onError(errorMessage: String?) {
+                onResult(null, null)
+            }
+        })
+    } else {
+        try {
+            @Suppress("DEPRECATION")
+            val addresses = geocoder.getFromLocationName(query, 1)
+            val address = addresses?.firstOrNull()
+            onResult(address?.latitude, address?.longitude)
+        } catch (e: Exception) {
+            onResult(null, null)
+        }
+    }
+}
+
+fun calculateDistanceKm(
+    userLat: Double,
+    userLon: Double,
+    campingLat: Double,
+    campingLon: Double
+): Float {
+    val results = FloatArray(1)
+    Location.distanceBetween(
+        userLat, userLon,
+        campingLat, campingLon,
+        results
+    )
+    return results[0] / 1000f
+}
+
+
+/* =========================
+   SCREEN 1: LIST
    ========================= */
 @Composable
 fun CampingsListScreen(
-    campings: List<Camping>,
+    campings: List<Campings>,
+    onCampingsUpdated: (List<Campings>) -> Unit,
     favViewModel: FavoritesViewModel,
     onCampingClick: (String) -> Unit,
     onFavoritesClick: () -> Unit
@@ -233,16 +317,80 @@ fun CampingsListScreen(
     var expanded by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf(SortOption.NAME_ASC) }
 
+    val context = LocalContext.current
+
+    var campingsWithDistance by remember { mutableStateOf(campings) }
+    var userLocation by remember { mutableStateOf<Location?>(null) }
+
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasLocationPermission = granted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            getUserLocation(context) { location ->
+                userLocation = location
+            }
+        }
+    }
+
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission && userLocation == null) {
+            getUserLocation(context) { location ->
+                userLocation = location
+            }
+        }
+    }
+
+    LaunchedEffect(userLocation) {
+        val loc = userLocation ?: return@LaunchedEffect
+
+        campings.forEach { camping ->
+            geocodeCamping(context, camping) { lat, lon ->
+                val distance = if (lat != null && lon != null) {
+                    calculateDistanceKm(loc.latitude, loc.longitude, lat, lon)
+                } else null
+
+                val updatedList = campingsWithDistance.map {
+                    if (it.signatura == camping.signatura) {
+                        it.copy(
+                            latitude = lat,
+                            longitude = lon,
+                            distanceKm = distance
+                        )
+                    } else it
+                }
+
+                campingsWithDistance = updatedList
+                onCampingsUpdated(updatedList)
+            }
+        }
+    }
     val favoriteIds by favViewModel.favoriteIds.collectAsState(initial = emptyList())
 
-    val sortedCampings = remember(campings, sortOption) {
+    val sortedCampings = remember(campingsWithDistance, sortOption) {
         when (sortOption) {
-            SortOption.NAME_ASC -> campings.sortedBy { it.nombre.lowercase() }
-            SortOption.NAME_DESC -> campings.sortedByDescending { it.nombre.lowercase() }
-            SortOption.PLACES_ASC -> campings.sortedBy { it.plazas }
-            SortOption.PLACES_DESC -> campings.sortedByDescending { it.plazas }
-            SortOption.CATEGORY_ASC -> campings.sortedBy { it.categoria.lowercase() }
-            SortOption.CATEGORY_DESC -> campings.sortedByDescending { it.categoria.lowercase() }
+            SortOption.NAME_ASC -> campingsWithDistance.sortedBy { it.nombre.lowercase() }
+            SortOption.NAME_DESC -> campingsWithDistance.sortedByDescending { it.nombre.lowercase() }
+            SortOption.PLACES_ASC -> campingsWithDistance.sortedBy { it.plazas }
+            SortOption.PLACES_DESC -> campingsWithDistance.sortedByDescending { it.plazas }
+            SortOption.CATEGORY_ASC -> campingsWithDistance.sortedBy { it.categoria.lowercase() }
+            SortOption.CATEGORY_DESC -> campingsWithDistance.sortedByDescending { it.categoria.lowercase() }
+            SortOption.DISTANCE_ASC -> campingsWithDistance.sortedBy { it.distanceKm ?: Float.MAX_VALUE }
+            SortOption.DISTANCE_DESC -> campingsWithDistance.sortedByDescending { it.distanceKm ?: -1f }
         }
     }
 
@@ -272,6 +420,8 @@ fun CampingsListScreen(
                             DropdownMenuItem(text = { Text("Plazas (mayor→menor)") }, onClick = { sortOption = SortOption.PLACES_DESC; expanded = false })
                             DropdownMenuItem(text = { Text("Categoría (A→Z)") }, onClick = { sortOption = SortOption.CATEGORY_ASC; expanded = false })
                             DropdownMenuItem(text = { Text("Categoría (Z→A)") }, onClick = { sortOption = SortOption.CATEGORY_DESC; expanded = false })
+                            DropdownMenuItem(text = { Text("Distancia (cerca→lejos)") },onClick = { sortOption = SortOption.DISTANCE_ASC; expanded = false })
+                            DropdownMenuItem(text = { Text("Distancia (lejos→cerca)") },onClick = { sortOption = SortOption.DISTANCE_DESC; expanded = false })
                         }
                     }
                 }
@@ -314,7 +464,7 @@ fun CampingsListScreen(
    🏕️ ITEM (con ícono favorito)
    ========================= */
 @Composable
-fun CampingItem(c: Camping, isFavorite: Boolean, onToggleFavorite: () -> Unit, onClick: () -> Unit) {
+fun CampingItem(c: Campings, isFavorite: Boolean, onToggleFavorite: () -> Unit, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -367,6 +517,21 @@ fun CampingItem(c: Camping, isFavorite: Boolean, onToggleFavorite: () -> Unit, o
                     }
                 }
             }
+            if (c.distanceKm != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "📏 %.1f km".format(c.distanceKm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            } else {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "📏 Distancia no disponible",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
 
             if (c.periodo.isNotBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -385,11 +550,11 @@ private fun SmallMetric(label: String, value: String) {
 }
 
 /* =========================
-   🖥️ SCREEN 2: DETAIL
+   SCREEN 2: DETAIL
    ========================= */
 @Composable
 fun CampingDetailScreen(
-    camping: Camping?,
+    camping: Campings?,
     favViewModel: FavoritesViewModel,
     onBack: () -> Unit,
     onFavoritesClick: () -> Unit
@@ -469,6 +634,19 @@ fun CampingDetailScreen(
                             if (camping.direccion.isNotBlank()) {
                                 val addr = if (camping.cp != 0) "${camping.direccion} (${camping.cp})" else camping.direccion
                                 Text(addr, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
+                            if (camping.distanceKm != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "📏 %.1f km".format(camping.distanceKm),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            } else {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "📏 Distancia no disponible",
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             }
                         }
                     }
@@ -570,9 +748,9 @@ fun FavoritesScreen(
 }
 
 /* =========================
-   🌍 INTENTS
+   INTENTS
    ========================= */
-fun openInMaps(context: android.content.Context, c: Camping) {
+fun openInMaps(context: android.content.Context, c: Campings) {
     val query = listOf(c.direccion, c.municipio, c.provincia).filter { it.isNotBlank() }.joinToString(", ").ifBlank { c.nombre }
     val uri = Uri.parse("geo:0,0?q=${Uri.encode(query)}")
     try { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
