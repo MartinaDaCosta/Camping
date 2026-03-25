@@ -47,6 +47,18 @@ dependencies {
     implementation("androidx.room:room-ktx:$room_version")
     ksp("androidx.room:room-compiler:$room_version")
 
+    // Retrofit + Moshi
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+    ksp("com.squareup.moshi:moshi-kotlin-codegen:1.15.1")
+
+    // Coroutines
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Splash Screen
+        implementation("androidx.core:core-splashscreen:1.0.1")
+
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")

@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.Lab" parent="android:Theme.Material.Light.NoActionBar" />
 
-    <style name="Theme.LAB" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.SplashTheme" parent="Theme.SplashScreen">
+        <!-- Color del fondo del splash -->
+        <item name="windowSplashScreenBackground">#4DB6AC</item>
+        <!-- Icono central del splash (usa el icono de tu app o crea uno) -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/valencamp2</item>
+        <!-- Tema al que transiciona después del splash -->
+        <item name="postSplashScreenTheme">@style/Theme.Lab</item>
+    </style>
+
 </resources>
