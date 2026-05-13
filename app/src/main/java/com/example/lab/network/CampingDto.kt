@@ -2,9 +2,9 @@ package com.example.lab.network
 
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
-import com.example.lab.Campings
+import com.example.lab.data.Campings
 
-// Wrapper raíz: { "result": { "records": [...] } }
+// Respuesta del JSON
 @JsonClass(generateAdapter = true)
 data class CampingApiResponse(
     @Json(name = "result") val result: CampingResult

@@ -3,7 +3,7 @@ package com.example.lab.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.lab.Campings
+import com.example.lab.data.Campings
 import com.example.lab.data.AppDatabase
 import com.example.lab.data.CampingFavorite
 import com.example.lab.data.FavoritesDao

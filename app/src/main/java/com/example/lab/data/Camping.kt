@@ -1,5 +1,4 @@
-package com.example.lab
-
+package com.example.lab.data
 
 data class Campings(
     val signatura: String,
